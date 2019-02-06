@@ -52,15 +52,17 @@ func main() {
 	var (
 		listenAddress  = flag.String("web.listen-address", ":9255", "Address on which to expose metrics and web interface.")
 		metricsPath    = flag.String("web.telemetry-path", "/metrics", "Path under which to expose metrics.")
+		hddtempCollect = flag.Bool("hddtemp-collect", "true", "Enable HDD temp collection.")
 		hddtempAddress = flag.String("hddtemp-address", "localhost:7634", "Address to fetch hdd metrics from.")
 	)
 	flag.Parse()
-
-	hddcollector := NewHddCollector(*hddtempAddress)
-	if err := hddcollector.Init(); err != nil {
-		log.Printf("error readding hddtemps: %v", err)
+	if *hddtempCollect == true {
+		hddcollector := NewHddCollector(*hddtempAddress)
+		if err := hddcollector.Init(); err != nil {
+			log.Printf("error readding hddtemps: %v", err)
+		}
+		prometheus.MustRegister(hddcollector)
 	}
-	prometheus.MustRegister(hddcollector)
 
 	lmscollector := NewLmSensorsCollector()
 	lmscollector.Init()
