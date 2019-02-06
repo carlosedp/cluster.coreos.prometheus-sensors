@@ -1,20 +1,4 @@
-# Merge sensor-exporter (https://github.com/amkay/sensor-exporter)
-# with hddtemp (https://github.com/Drewster727/hddtemp-docker)
-
-# docker build -t epflsti/cluster.coreos.prometheus-sensors .
-# docker run -i -t epflsti/cluster.coreos.prometheus-sensors bash
-# @TODO: find which capabilities' needed instead of privilegied (note: sys_admin cap not working)
-# docker run --privileged=true -v "/dev":"/dev":rw  --publish=9192:9255 --name=cluster.coreos.prometheus-sensors  epflsti/cluster.coreos.prometheus-sensors
-
-# Use phusion/baseimage as base image. To make your builds
-# reproducible, make sure you lock down to a specific version, not
-# to `latest`! See
-# https://github.com/phusion/baseimage-docker/blob/master/Changelog.md
-# for a list of version numbers.
-FROM phusion/baseimage:latest
-
-# Use baseimage-docker's init system.
-CMD ["/sbin/my_init"]
+FROM golang:1.11.5-stretch as build
 
 # Install hddtemp
 RUN apt-get update && apt-get -y install \
@@ -24,26 +8,46 @@ RUN apt-get update && apt-get -y install \
         hddtemp \
         lm-sensors \
         libsensors4-dev \
-        git \
-        golang-go
+        git
 
 # Clean up APT when done.
 RUN apt-get clean && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
 
-RUN mkdir /go
+RUN mkdir -p /go
 ENV GOPATH=/go
 
 RUN go get \
         github.com/amkay/gosensors \
         github.com/prometheus/client_golang/prometheus
 
-# Copy the local package files to the container's workspace.
-ADD sensor-exporter /go/src/github.com/ncabatoff/sensor-exporter
+RUN git clone https://github.com/epfl-sti/cluster.coreos.prometheus-sensors
+RUN mkdir -p /go/src/github.com/ncabatoff/
+RUN cp -R cluster.coreos.prometheus-sensors/sensor-exporter /go/src/github.com/ncabatoff/
 
 RUN go install github.com/ncabatoff/sensor-exporter
 
+RUN cp /usr/lib/$(uname -m)-linux-gnu/libsensors.so.4.4.0 /libsensors.so.4.4.0
+RUN cp /usr/lib/$(uname -m)-linux-gnu/libsensors.a /libsensors.a
+
+#----------------------------------------------------------------
+FROM debian:stretch-slim
+
+WORKDIR /root/
+COPY --from=build /go/bin/sensor-exporter .
+
+COPY --from=build /libsensors.so.4.4.0 /
+COPY --from=build /libsensors.a /
+
+RUN ARCH=$(uname -m) && \
+    mv /libsensors.so.4.4.0 /usr/lib/$ARCH-linux-gnu/ && \
+    mv /libsensors.a /usr/lib/$ARCH-linux-gnu/ && \
+    ln -sf /usr/lib/$ARCH-linux-gnu/libsensors.so.4.4.0 /usr/lib/$ARCH-linux-gnu/libsensors.so.4 && \
+    ln -sf /usr/lib/$ARCH-linux-gnu/libsensors.so.4 /usr/lib/$ARCH-linux-gnu/libsensors.so
+
 # Run the outyet command by default when the container starts.
-ENTRYPOINT [ "/bin/bash", "-c", "set -x; hddtemp -q -d -F /dev/sd? & /go/bin/sensor-exporter" ]
+#ENTRYPOINT [ "/bin/bash", "-c", "set -x; hddtemp -q -d -F /dev/sd? & /go/bin/sensor-exporter" ]
+CMD [ "/root/sensor-exporter" ]
 
 # Document that the service listens on port 9255.
 EXPOSE 9255
+
